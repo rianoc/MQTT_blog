@@ -2,25 +2,31 @@
 
 * [KX IoT with MQTT](#kx-iot-with-mqtt)
   * [What is MQTT](#what-is-mqtt)
+  * [Sections](#sections)
+* [Install and setup](#install-and-setup)
   * [Install and test a broker](#install-and-test-a-broker)
   * [Install kdb+](#install-kdb)
   * [Install the KX MQTT interface](#install-the-kx-mqtt-interface)
   * [Test the KX MQTT interface](#test-the-kx-mqtt-interface)
-  * [Example use-case: Environmental Monitor](#example-use-case-environmental-monitor)
-    * [Read serial data with kdb+](#read-serial-data-with-kdb)
-    * [Calculate an error detecting checksum in kdb+](#calculate-an-error-detecting-checksum-in-kdb)
-    * [Home Assistant](#home-assistant)
-    * [Configuring sensors](#configuring-sensors)
-    * [QoS](#qos)
-    * [Retained messages](#retained-messages)
-    * [Publishing updates](#publishing-updates)
-    * [Home Assistant UI](#home-assistant-ui)
-    * [Subscribing to data in kdb+](#subscribing-to-data-in-kdb)
-    * [Storing MQTT sensor data in Kdb+](#storing-mqtt-sensor-data-in-kdb)
-      * [Storing config data](#storing-config-data)
-      * [Storing state data](#storing-state-data)
-      * [Persisting data to disk](#persisting-data-to-disk)
-    * [Querying data](#querying-data)
+* [Reading sensor data](#reading-sensor-data)
+  * [Read serial data with kdb+](#read-serial-data-with-kdb)
+  * [Calculate an error detecting checksum](#calculate-an-error-detecting-checksum)
+* [Publishing data to an IoT platform](#publishing-data-to-an-iot-platform)
+  * [Home Assistant](#home-assistant)
+  * [Configuring sensors](#configuring-sensors)
+  * [QoS](#qos)
+  * [Retained messages](#retained-messages)
+  * [Publishing updates](#publishing-updates)
+  * [Home Assistant UI](#home-assistant-ui)
+* [Creating a sensor database](#creating-a-sensor-database)
+  * [Subscribing to data in kdb+](#subscribing-to-data-in-kdb)
+  * [Storing MQTT sensor data](#storing-mqtt-sensor-data)
+    * [Storing config data](#storing-config-data)
+    * [Storing state data](#storing-state-data)
+    * [Persisting data to disk](#persisting-data-to-disk)
+* [Creating a query API](#creating-a-query-api)
+* [Conclusion](#conclusion)
+  * [Links & References](#links--references)
 
 ## What is MQTT
 
@@ -28,7 +34,18 @@
 
 KX have  released an MQTT interface. Documented on [code.kx.com](https://code.kx.com/q/interfaces/mqtt/) with source code available on [Github](https://github.com/KXSystems/mqtt). The interface supports Linux/Mac/Windows platforms.
 
-For examples below a Raspberry Pi 3 Model B+ has been chosen as a host. This is a low powered single board computer which is suitable as an edge computing host. The Linux ARM 32-bit release of kdb+ enables it to run on the Raspberry Pi.
+For examples in this paper a Raspberry Pi 3 Model B+ has been chosen as a host. This is a low powered single board computer which is suitable as an edge computing host. The Linux ARM 32-bit release of kdb+ enables it to run on the Raspberry Pi.
+
+## Sections
+
+1. [Install and setup](#install-and-setup)
+2. [Reading sensor data](#reading-sensor-data)
+3. [Publishing data to an IoT Platform](#publishing-data-to-an-iot-platform)
+4. [Creating a sensor database](#creating-a-sensor-database)
+5. [Creating a query API](#creating-a-query-api)
+6. [Conclusion](#conclusion)
+
+# Install and setup
 
 ## Install and test a broker
 
@@ -139,7 +156,7 @@ q)(`msgsent;2)
 
 More examples are included on [code.kx.com](https://code.kx.com/q/interfaces/mqtt/examples/)
 
-## Example use-case: Environmental Monitor
+# Reading sensor data
 
 For a simple example project we will collect some sensor data and publish it to an IoT platform.
 The full project is available on [Github](https://github.com/rianoc/EnvironmentalMonitor).
@@ -150,7 +167,7 @@ The data source will be an [Arduino](https://www.arduino.cc/) microcontroller. T
 
 ![Arduino with sensors](images/EnvironmentalMonitor.jpg)
 
-### Read serial data with kdb+
+## Read serial data with kdb+
 
 Reading the serial data in kdb+ is quick using [named pipe](https://code.kx.com/q/kb/named-pipes/) support:
 
@@ -160,7 +177,7 @@ q)read0 ser
 "26.70,35,736,1013,-5.91,26421"
 ```
 
-The comma seperated field contain:
+The comma separated field contain:
 
 1. Temperature - Celsius
 1. Humidity - Percent
@@ -169,7 +186,7 @@ The comma seperated field contain:
 1. Altitude - m (Not accurate)
 1. CRC-16 - checksum of data fields
 
-### Calculate an error detecting checksum in kdb+
+## Calculate an error detecting checksum
 
 The final field is particularly important. This is a [checksum](https://en.wikipedia.org/wiki/Cyclic_redundancy_check) which enables error-detection, a requirement as serial data can be unreliable. Without this incorrect data could be interpreted as correct. For example a temperature reading such as `26.70` missing it's decimal point would be published as `2670`.
 
@@ -199,11 +216,13 @@ Error with data
 26.30,36,739,101020,-56.88,17352
 ```
 
-### Home Assistant
+# Publishing data to an IoT platform
+
+## Home Assistant
 
 [Home Assistant](https://www.home-assistant.io/) is a home automation platform. To make the sensor data captured available to Home Assistant it can be published over MQTT.
 
-### Configuring sensors
+## Configuring sensors
 
 On any IoT platform metadata is needed about sensors such as their name and unit of measure.
 Home Assistant includes [MQTT Discovery](https://www.home-assistant.io/docs/mqtt/discovery/) to allow sensors to configure themselves. This is a powerful feature as a sensor can send rich metadata once allowing for subsequent sensor state updates packets to be small. This helps to reduce bandwidth requirements which in IoT environment is important.
@@ -276,13 +295,13 @@ configure:{[s]
 configure each sensors;
 ```
 
-Note that [.mqtt.pubx](https://code.kx.com/q/interfaces/mqtt/reference/#mqttpubx) rather than the default `.mqtt.pub` is used to set QoS to `1` and Retain to true (`1b`) for this configuration messages
+Note that [.mqtt.pubx](https://code.kx.com/q/interfaces/mqtt/reference/#mqttpubx) rather than the default `.mqtt.pub` is used to set QoS to `1` and Retain to true (`1b`) for these configuration messages.
 
 ```q
 .mqtt.pubx[topic;;1;1b]
 ```
 
-### QoS
+## QoS
 
 Quality of Service (QoS) is an important feature. There are 3 QoS levels in MQTT:
 
@@ -292,12 +311,12 @@ Quality of Service (QoS) is an important feature. There are 3 QoS levels in MQTT
 
 To be a lightweight system MQTT will default to a fire and forget approach to sending messages QoS 0. This may be suitable for temperature updates in our system as one missed update will not cause any issues. However for our configuration of sensors we do want to ensure this information arrives. In this case we choose QoS 1. QoS 2 has more overheard than 1 and here is of no benefit as there is no drawback to configuring a sensor twice.
 
-### Retained messages
+## Retained messages
 
 Unlike other messaging systems such as a kdb+ [Tickerplant](https://code.kx.com/q/learn/startingkdb/tick/#tickerplant), [Kafka](https://code.kx.com/q/interfaces/kafka/), or [Solace](https://code.kx.com/q/interfaces/solace/) MQTT does not retain logs of all data that flows through the broker. This makes sense as the MQTT broker should be lightweight and able to run on an edge device with slow and limited storage. Also in a bandwidth limited environment attempting to replay large logs could interfere with the publishing of the more important real-time data.
 The MQTT spec does however allow for a single message to be retained per topic. Importantly what this allows for is that our downstream clients no matter when they connect will receive the configuration metadata of our sensors.
 
-### Publishing updates
+## Publishing updates
 
 Now that the sensors are configured the process runs a timer once per second to publish state updates.
 
@@ -339,7 +358,7 @@ An example JSON message on the topic `homeassistant/sensor/livingroom/state`:
 
 It can be noted here that we published a configure message per sensor but for state changes we are publishing a single message. This is chosen for efficiency to reduce the overall volume of messages the broker must relay. The `value_template` field we populated allows Home Assistant to extract the data for each sensor from the JSON dictionary. This allows for the number of sensors per update to be flexible.
 
-### Home Assistant UI
+## Home Assistant UI
 
 Home Assistant includes a UI to view data. A display for the data can be configured in the UI or defined in YAML.
 
@@ -364,7 +383,9 @@ Clicking on any one sensor allows a more detailed graph to be seen:
 
 ![Sensor graph](images/graph.png)
 
-### Subscribing to data in kdb+
+# Creating a sensor database
+
+## Subscribing to data in kdb+
 
 Subscribing to the published data from another kdb+ process is quick. MQTT uses `/` to split a topic hierarchy and when subscribing `#` can be used to subscribe to all subtopics:
 
@@ -381,7 +402,6 @@ Immediately on connection the broker publishes any Retained messages on topics:
 (`msgrecvd;"homeassistant/sensor/livingroomHumidity/config";"{\"device_class\":\"humidity\",\"name\":\"Humidity\",\"unique_id\":\"livingroomHumidity\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"%\",\"value_template\":\"{{ value_json.humidity}}\"}")
 (`msgrecvd;"homeassistant/sensor/livingroomLight/config";"{\"device_class\":\"None\",\"name\":\"Light\",\"unique_id\":\"livingroomLight\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"hPa\",\"value_template\":\"{{ value_json.light}}\"}")
 (`msgrecvd;"homeassistant/sensor/livingroomPressure/config";"{\"device_class\":\"pressure\",\"name\":\"Pressure\",\"unique_id\":\"livingroomPressure\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"/1024\",\"value_template\":\"{{ value_json.pressure}}\"}")
-(`
 ```
 
 Following that any newly published messages will follow:
@@ -391,20 +411,20 @@ Following that any newly published messages will follow:
 (`msgrecvd;"homeassistant/sensor/livingroom/state";"{\"temperature\":21.5,\"humidity\":37,\"light\":172,\"pressure\":1012}")
 ```
 
-### Storing MQTT sensor data in Kdb+
+## Storing MQTT sensor data
 
 Home Assistant does include an [SQLite](https://www.sqlite.org/index.html) embedded database for storing data. However it is not suitable for storing large amounts of historical sensor data.
 Instead we can look to kdb+ to do this for us.
 
-#### Storing config data
+### Storing config data
 
 ...
 
-#### Storing state data
+### Storing state data
 
 ...
 
-#### Persisting data to disk
+### Persisting data to disk
 
 Extending again we can save data to disk daily. The historic data table is named `readingsHist`, this is done to keep the example simple. Both historic and real-time data can be queried within one process.
 
@@ -425,6 +445,12 @@ HDB:`:/home/pi/sensorHDB
     }
 ```
 
-### Querying data
+# Creating a query API
 
 ...
+
+# Conclusion
+
+## Links & References
+
+* ...
