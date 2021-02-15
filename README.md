@@ -17,6 +17,7 @@
   * [QoS](#qos)
   * [Retained messages](#retained-messages)
   * [Publishing updates](#publishing-updates)
+  * [Reducing data volume](#reducing-data-volume)
   * [Home Assistant UI](#home-assistant-ui)
 * [Creating a sensor database](#creating-a-sensor-database)
   * [Subscribing to data in kdb+](#subscribing-to-data-in-kdb)
@@ -26,7 +27,8 @@
     * [Persisting data to disk](#persisting-data-to-disk)
 * [Creating a query API](#creating-a-query-api)
 * [Conclusion](#conclusion)
-  * [Links & References](#links--references)
+  * [Relevant Links](#relevant-links)
+  * [Other publications by the author](#other-publications-by-the-author)
 
 ## What is MQTT
 
@@ -49,7 +51,7 @@ For examples in this paper a Raspberry Pi 3 Model B+ has been chosen as a host. 
 
 ## Install and test a broker
 
-An MQTT broker is a server that receives all messages from the clients and then routes the messages to the appropriate destination clients.
+An MQTT broker is a process that receives all messages from the clients and then routes the messages to the appropriate destination clients.
 [Eclipse Mosquitto](https://mosquitto.org/) is one of [many](https://github.com/mqtt/mqtt.github.io/wiki/brokers) implementations. We will use it for our example.
 
 Install the broker with:
@@ -89,7 +91,7 @@ mv q/l32arm q/l32
 mv q ~/
 ```
 
-Ensuring to add `QHOME` to your `.bashrc`:
+Add `QHOME` to your `.bashrc`:
 
 ```bash
 export PATH="$PATH:/home/pi/q/l32"
@@ -101,7 +103,7 @@ export QHOME="/home/pi/q"
 Full instructions for all platforms are on [Github](https://github.com/KXSystems/mqtt).
 Other platforms have fewer steps as there are pre compiled releases. For ARM we will compile from source.
 
-Install needed dependencies which are needed to compile the projects:
+Install the dependencies which are needed to compile the projects:
 
 ```bash
 sudo apt-get install libssl-dev cmake
@@ -211,9 +213,7 @@ crc16:{
 In this example pressure can be seen to have arrived incorrectly as `101020` rather than `1020`:
 
 ```txt
-Failed checksum check
-Error with data
-26.30,36,739,101020,-56.88,17352
+Error with data: "26.30,36,739,101020,-56.88,17352" 'Failed checksum check
 ```
 
 # Publishing data to an IoT platform
@@ -235,7 +235,7 @@ name        class       unit        icon
 ---------------------------------------------------------
 temperature temperature "ºC"        ""                   
 humidity    humidity    "%"         ""                   
-light                   "/1023"     "white-balance-sunny"
+light                   "/100"     "white-balance-sunny"
 pressure    pressure    "hPa"       ""                   
 ```
 
@@ -244,7 +244,7 @@ pressure    pressure    "hPa"       ""
 * `unit` - the unit of measure of the sensor
 * `icon` - An icon can be chosen for the UI.
 
-As out light sensor does not fall in to a known `class` it's value is left as null and we must chose an `icon` as without a default `class` one will not be automatically populated.
+As our light sensor does not fall in to a known `class` it's value is left as null and we must chose an `icon` as without a default `class` one will not be automatically populated.
 
 Now that we have defined out metadata we are required to publish it. MQTT uses a hierarchy of topics when data is published. To configure a home assistant sensor a message must arrive on a topic of the structure:
 
@@ -358,6 +358,85 @@ An example JSON message on the topic `homeassistant/sensor/livingroom/state`:
 
 It can be noted here that we published a configure message per sensor but for state changes we are publishing a single message. This is chosen for efficiency to reduce the overall volume of messages the broker must relay. The `value_template` field we populated allows Home Assistant to extract the data for each sensor from the JSON dictionary. This allows for the number of sensors per update to be flexible.
 
+## Reducing data volume
+
+In our example we are publishing 4 values every seconds, in a day this is 86k updates resulting in 344k sensor values being stored in our database.
+Many of these values will be repeated. As these are state changes and not events there is no value is storing repeats. In an IoT project for efficiency this should be addressed at the source and not the destination.
+This edge processing is necessary to reduce the hardware and network requirements throughout the full stack.
+
+The first step we take is to add a `lastPub` and `lastVal` column to our `sensors` metadata table:
+
+```q
+name        class       unit        icon                  lastPub lastVal
+-------------------------------------------------------------------------
+temperature temperature "\302\272C" ""                    
+humidity    humidity    "%"         ""                    
+light                   "/100"      "white-balance-sunny" 
+pressure    pressure    "hPa"       ""                    
+```
+
+Then rather than publishing any new data from a sensor when available we instead pass it through a `filterPub` function.
+
+From:
+
+```q
+.mqtt.pub[`$"homeassistant/sensor/",room,"/state"] .j.j sensors[`name]!"F"$4#data;
+```
+
+To:
+
+```q
+filterPub "F"$4#data;
+```
+
+The function will only publish data when either the sensor value changes or if 10 minutes has elapsed since the last time a sensor had an update published:
+
+```q
+filterPub:{[newVals]
+ newVals:@[newVals;2;{`float$floor x%10.23}];
+ now:.z.p;
+ toPub:exec (lastPub<.z.p-0D00:10) or (not lastVal=newVals) from sensors;
+ if[count where toPub;
+    update lastPub:now,lastVal:newVals[where toPub] from `sensors where toPub;
+    msg:.j.j exec name!lastVal from sensors where toPub;
+    .mqtt.pub[`$"homeassistant/sensor/",room,"/state";msg];
+  ];
+ }
+ ```
+
+Setting the 10 minute minimum publish window is important to act as a heartbeat. This will ensure that the difference between a broken or disconnected sensor can be distinguished from a sensor whose value is simply unchanged over a large time window. Also considering MQTT does not retain values we wish to ensure any new subscribers will receive a timely update on the value of all sensors.
+
+Now when we start our process there are fewer updates and only sensors with new values are included:
+
+```
+homeassistant/sensor/livingroom/state "{\"temperature\":21.1,\"humidity\":38,\"light\":24,\"pressure\":1002}"
+homeassistant/sensor/livingroom/state "{\"light\":23}"
+homeassistant/sensor/livingroom/state "{\"light\":24}"
+homeassistant/sensor/livingroom/state "{\"pressure\":1001}"
+homeassistant/sensor/livingroom/state "{\"temperature\":21.2,\"pressure\":1002}"
+homeassistant/sensor/livingroom/state "{\"temperature\":21.1}"
+```
+
+The UI also needed more complex `value_template` logic in metadata to extract the data if present but use the prevailing state value if not.
+
+From:
+
+```
+{{ value_json.pressure }}
+```
+
+To:
+
+```
+{% if value_json.pressure %}
+ {{ value_json.pressure }}
+{% else %}
+ {{ states('sensor.livingroompressure') }}
+{% endif %}
+```
+
+Rather than daily 86k updates resulting in 344k sensor values being stored in our database this small changes reduced those to ...
+
 ## Home Assistant UI
 
 Home Assistant includes a UI to view data. A display for the data can be configured in the UI or defined in YAML.
@@ -451,6 +530,15 @@ HDB:`:/home/pi/sensorHDB
 
 # Conclusion
 
-## Links & References
+The addition of an MQTT interface opens a huge range of possibilities.
 
-* ...
+## Relevant Links
+
+* [KX POC Blog Series: Edge Computing on a Low-Profile Device](https://kx.com/blog/kx-poc-blog-series-edge-computing-on-a-low-profile-device/)
+
+## Other publications by the author
+
+* [Kdb+/q Insights: Parsing data in kdb+](https://kx.com/blog/kx-product-insights-parsing-data-in-kdb/)
+* [Kdb+/q Insights: Parsing JSON files](https://kx.com/blog/kdb-q-insights-parsing-json-files/)
+* [Partitioning data in kdb+](https://kx.com/blog/partitioning-data-in-kdb/)
+* [How to Avoid a Goat in Monte Carlo – Elegantly](https://kx.com/blog/how-to-avoid-a-goat-in-monte-carlo-elegantly/)
