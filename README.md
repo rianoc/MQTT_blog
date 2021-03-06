@@ -16,6 +16,7 @@
   * [Configuring sensors](#configuring-sensors)
   * [QoS](#qos)
   * [Retained messages](#retained-messages)
+  * [Retaining flexibility](#retaining-flexibility)
   * [Publishing updates](#publishing-updates)
   * [Reducing data volume](#reducing-data-volume)
   * [Home Assistant UI](#home-assistant-ui)
@@ -255,7 +256,7 @@ Now that we have defined out metadata we are required to publish it. MQTT uses a
 An example for humidity sensor would be:
 
 ```
-homeassistant/sensor/livingroomHumidity/config
+homeassistant/sensor/livingroomhumidity/config
 ```
 
 The payload we publish on this topic will include our metadata along with some extra fields.
@@ -269,8 +270,8 @@ A populated JSON config message for the humidity sensors:
 ```json
 {
   "device_class":"humidity",
-  "name":"Humidity",
-  "unique_id":"livingroomHumidity",
+  "name":"humidity",
+  "unique_id":"livingroomhumidity",
   "state_topic":"homeassistant/sensor/livingroom/state",
   "unit_of_measurement":"%",
   "value_template":"{{ value_json.humidity}}"
@@ -282,7 +283,7 @@ The `configure` function publishes a config message for each sensor in the table
 ```
 configure:{[s]
   msg:(!). flip (
-   (`name;room,@[;0;upper] string s`name);
+   (`name;room,string s`name);
    (`state_topic;"homeassistant/sensor/",room,"/state");
    (`unit_of_measurement;s`unit);
    (`value_template;"{{ value_json.",string[s`name],"}}"));
@@ -315,6 +316,48 @@ To be a lightweight system MQTT will default to a fire and forget approach to se
 
 Unlike other messaging systems such as a kdb+ [Tickerplant](https://code.kx.com/q/learn/startingkdb/tick/#tickerplant), [Kafka](https://code.kx.com/q/interfaces/kafka/), or [Solace](https://code.kx.com/q/interfaces/solace/) MQTT does not retain logs of all data that flows through the broker. This makes sense as the MQTT broker should be lightweight and able to run on an edge device with slow and limited storage. Also in a bandwidth limited environment attempting to replay large logs could interfere with the publishing of the more important real-time data.
 The MQTT spec does however allow for a single message to be retained per topic. Importantly what this allows for is that our downstream clients no matter when they connect will receive the configuration metadata of our sensors.
+
+## Retaining flexibility
+
+Reviewing our `sensors` table and `configure` function we can spot some patterns. Optional configuration variables such as `icon` tend to be sparsely populated in the table and require specific `if` blocks in our `configure` function. Further reviewing the [MQTT Sensor](https://www.home-assistant.io/integrations/sensor.mqtt/) specification we can see there are a total of 26 optional variables. If we were to support all of these our table would be extremely wide and sparsely populated and the `configure` function would need 26 `if` statements. This is clearly something to avoid. Furthermore if a new optional variable was added to the spec we would need to update our full system and database schema.
+
+This example shows the importance of designing an IoT system for flexibility. When dealing with many vendors and specifications the number of possible configurations is huge.
+
+To address this in our design we change our table to move all optional parameters to an `opts` column which stores the values in dictionaries.
+
+```q
+sensors:([] name:`temperature`humidity`light`pressure;
+            opts:(`device_class`unit_of_measurement!(`temperature;"ºC");
+                  `device_class`unit_of_measurement!(`humidity;"%");
+                  `unit_of_measurement`icon!("/100";"white-balance-sunny");
+                  `device_class`unit_of_measurement!(`pressure;"hPa"))
+ )
+```
+
+Doing this allows the sensors to include any optional variable they wish and we do not need to populate any nulls.
+
+```q
+name        opts                                                            
+----------------------------------------------------------------------------
+temperature `device_class`unit_of_measurement!(`temperature;"\302\272C")
+humidity    `device_class`unit_of_measurement!(`humidity;"%")           
+light       `unit_of_measurement`icon!("/100";"white-balance-sunny")    
+pressure    `device_class`unit_of_measurement!(`pressure;"hPa")     
+```
+
+Our `configure` function is then simplified as there need not be any special handling of optional variables.
+
+```q
+configure:{[s]
+  msg:(!). flip (
+   (`name;room,string s`name);
+   (`state_topic;"homeassistant/sensor/",room,"/state");
+   (`value_template;createTemplate string[s`name]));
+   msg,:s`opts;
+   topic:`$"homeassistant/sensor/",msg[`name],"/config";
+   .mqtt.pubx[topic;;1;1b] .j.j msg;
+ }
+```
 
 ## Publishing updates
 
@@ -367,12 +410,23 @@ This edge processing is necessary to reduce the hardware and network requirement
 The first step we take is to add a `lastPub` and `lastVal` column to our `sensors` metadata table:
 
 ```q
-name        class       unit        icon                  lastPub lastVal
--------------------------------------------------------------------------
-temperature temperature "\302\272C" ""                    
-humidity    humidity    "%"         ""                    
-light                   "/100"      "white-balance-sunny" 
-pressure    pressure    "hPa"       ""                    
+sensors:([] name:`temperature`humidity`light`pressure;
+            lastPub:4#0Np;
+            lastVal:4#0Nf;
+            opts:(`device_class`unit_of_measurement!(`temperature;"ºC");
+                  `device_class`unit_of_measurement!(`humidity;"%");
+                  `unit_of_measurement`icon!("/100";"white-balance-sunny");
+                  `device_class`unit_of_measurement!(`pressure;"hPa"))
+ )
+```
+
+```q
+name        lastPub lastVal opts                                                            
+--------------------------------------------------------------------------------------------
+temperature                 `device_class`unit_of_measurement!(`temperature;"\302\272C")
+humidity                    `device_class`unit_of_measurement!(`humidity;"%")           
+light                       `unit_of_measurement`icon!("/100";"white-balance-sunny")    
+pressure                    `device_class`unit_of_measurement!(`pressure;"hPa")    
 ```
 
 Then rather than publishing any new data from a sensor when available we instead pass it through a `filterPub` function.
@@ -435,7 +489,7 @@ To:
 {% endif %}
 ```
 
-Rather than daily 86k updates resulting in 344k sensor values being stored in our database this small changes reduced those to ...
+Rather than daily 86k updates resulting in 344k sensor values being stored in our database this small changes reduced those to 6k updates delivering 6.5k sensor values. Reducing updates by 93% and stored values by 98%!
 
 ## Home Assistant UI
 
@@ -477,10 +531,10 @@ q).mqtt.sub[`$"homeassistant/#"]
 Immediately on connection the broker publishes any Retained messages on topics:
 
 ```q
-(`msgrecvd;"homeassistant/sensor/livingroomTemperature/config";"{\"device_class\":\"temperature\",\"name\":\"Temperature\",\"unique_id\":\"livingroomTemperature\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"\302\272C\",\"value_template\":\"{{ value_json.temperature}}\"}")
-(`msgrecvd;"homeassistant/sensor/livingroomHumidity/config";"{\"device_class\":\"humidity\",\"name\":\"Humidity\",\"unique_id\":\"livingroomHumidity\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"%\",\"value_template\":\"{{ value_json.humidity}}\"}")
-(`msgrecvd;"homeassistant/sensor/livingroomLight/config";"{\"device_class\":\"None\",\"name\":\"Light\",\"unique_id\":\"livingroomLight\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"hPa\",\"value_template\":\"{{ value_json.light}}\"}")
-(`msgrecvd;"homeassistant/sensor/livingroomPressure/config";"{\"device_class\":\"pressure\",\"name\":\"Pressure\",\"unique_id\":\"livingroomPressure\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"/1024\",\"value_template\":\"{{ value_json.pressure}}\"}")
+(`msgrecvd;"homeassistant/sensor/livingroomtemperature/config";"{\"device_class\":\"temperature\",\"name\":\"temperature\",\"unique_id\":\"livingroomtemperature\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"\302\272C\",\"value_template\":\"{{ value_json.temperature}}\"}")
+(`msgrecvd;"homeassistant/sensor/livingroomhumidity/config";"{\"device_class\":\"humidity\",\"name\":\"humidity\",\"unique_id\":\"livingroomhumidity\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"%\",\"value_template\":\"{{ value_json.humidity}}\"}")
+(`msgrecvd;"homeassistant/sensor/livingroomlight/config";"{\"device_class\":\"None\",\"name\":\"light\",\"unique_id\":\"livingroomlight\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"hPa\",\"value_template\":\"{{ value_json.light}}\"}")
+(`msgrecvd;"homeassistant/sensor/livingroompressure/config";"{\"device_class\":\"pressure\",\"name\":\"pressure\",\"unique_id\":\"livingroompressure\",\"state_topic\":\"homeassistant/sensor/livingroom/state\",\"unit_of_measurement\":\"/1024\",\"value_template\":\"{{ value_json.pressure}}\"}")
 ```
 
 Following that any newly published messages will follow:
