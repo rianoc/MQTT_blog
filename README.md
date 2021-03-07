@@ -34,6 +34,7 @@
 * [Graphing the data](#graphing-the-data)
 * [Conclusion](#conclusion)
   * [Relevant Links](#relevant-links)
+  * [Github links](#github-links)
   * [Other publications by the author](#other-publications-by-the-author)
 
 ## What is MQTT
@@ -168,7 +169,7 @@ More examples are included on [code.kx.com](https://code.kx.com/q/interfaces/mqt
 # Reading sensor data
 
 For a simple example project we will collect some sensor data and publish it to an IoT platform.
-The full project is available on [Github](https://github.com/rianoc/EnvironmentalMonitor).
+The full project is available at [github.com/rianoc/EnvironmentalMonitor](https://github.com/rianoc/EnvironmentalMonitor).
 
 ![Dataflow layout](images/layout.png)
 
@@ -524,6 +525,8 @@ Clicking on any one sensor allows a more detailed graph to be seen:
 
 # Creating a sensor database
 
+The source code for the following section is available at [github.com/rianoc/qHomeAssistantMQTT](https://github.com/rianoc/qHomeAssistantMQTT)
+
 ## Subscribing to data in kdb+
 
 Subscribing to the published data from another kdb+ process is quick. MQTT uses `/` to split a topic hierarchy and when subscribing `#` can be used to subscribe to all subtopics:
@@ -821,6 +824,13 @@ The addition of an MQTT interface opens a huge range of possibilities.
 ## Relevant Links
 
 * [KX POC Blog Series: Edge Computing on a Low-Profile Device](https://kx.com/blog/kx-poc-blog-series-edge-computing-on-a-low-profile-device/)
+
+## Github links
+
+* [github.com/rianoc/EnvironmentalMonitor](https://github.com/rianoc/EnvironmentalMonitor)
+* [github.com/rianoc/qHomeAssistantMQTT](https://github.com/rianoc/qHomeAssistantMQTT)
+* [github.com/rianoc/MQTT_blog](https://github.com/rianoc/MQTT_blog)
+* [github.com/rianoc/qZigbee](https://github.com/rianoc/qZigbee)
 
 ## Other publications by the author
 
