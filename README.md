@@ -27,10 +27,11 @@
     * [Storing state data](#storing-state-data)
       * [Extracting data from JSON templates using Jinja](#extracting-data-from-json-templates-using-jinja)
     * [Persisting data to disk](#persisting-data-to-disk)
+    * [Creating a basic query API](#creating-a-basic-query-api)
 * [Zigbee](#zigbee)
   * [Zigbee2MQTT](#zigbee2mqtt)
   * [Capturing Zigbee sensor data in kdb+](#capturing-zigbee-sensor-data-in-kdb)
-* [Creating a query API](#creating-a-query-api)
+* [Graphing the data](#graphing-the-data)
 * [Conclusion](#conclusion)
   * [Relevant Links](#relevant-links)
   * [Other publications by the author](#other-publications-by-the-author)
@@ -49,8 +50,9 @@ For examples in this paper a Raspberry Pi 3 Model B+ has been chosen as a host. 
 2. [Reading sensor data](#reading-sensor-data)
 3. [Publishing data to an IoT Platform](#publishing-data-to-an-iot-platform)
 4. [Creating a sensor database](#creating-a-sensor-database)
-5. [Creating a query API](#creating-a-query-api)
-6. [Conclusion](#conclusion)
+5. [Zigbee](#zigbee)
+6. [Graphing the data](#graphing-the-data)
+7. [Conclusion](#conclusion)
 
 # Install and setup
 
@@ -673,13 +675,41 @@ writeToDisk:{[now]
  }
 ```
 
+### Creating a basic query API
+
+A very basic query API can be created to extract the data from the system
+
+```q
+queryState:{[sensor;sTime;eTime]
+  hist:delete int from select from sensorStateHist where int within hour (sTime;eTime),name like sensor,time within (sTime;eTime);
+  realtime:select from sensorState where name like sensor,time within (sTime;eTime);
+  hist,realtime
+ }
+```
+
+By using `like` a wildcard `*` can then be passed to return several sensors:
+
+```q
+q)queryState["0x00124b001b78047b*";2021.03.05D0;2021.03.07D0]
+time                          name                           state
+------------------------------------------------------------------
+2021.03.06D19:01:29.912672000 0x00124b001b78047b battery     64   
+2021.03.06D19:01:29.912672000 0x00124b001b78047b temperature 19.6 
+2021.03.06D19:01:29.912672000 0x00124b001b78047b humidity    48.22
+2021.03.06D19:01:29.912672000 0x00124b001b78047b linkquality 139  
+2021.03.06D19:02:58.884287000 0x00124b001b78047b battery     64   
+2021.03.06D19:02:58.884287000 0x00124b001b78047b temperature 19.6 
+2021.03.06D19:02:58.884287000 0x00124b001b78047b humidity    49.42
+2021.03.06D19:02:58.884287000 0x00124b001b78047b linkquality 139  
+```
+
 # Zigbee
 
-[Zigbee](https://zigbeealliance.org/) is a wireless mess network protocol designed for usage in IoT applications. Unlike WiFi it's data transmission rate is a low 250 kbit/s but it's key advantage is simplicity and lower power usage.
+[Zigbee](https://zigbeealliance.org/) is a wireless mess network protocol designed for usage in IoT applications. Unlike Wi-Fi it's data transmission rate is a low 250 kbit/s but it's key advantage is simplicity and lower power usage.
 
 A device such as a [Sonoff SNZB-02](https://sonoff.tech/product/smart-home-security/snzb-02) temperature & humidity sensor can wirelessly send updates for months using only a small coin cell battery.
 
-Most often to capture data a bridge/hub device is needed which communicates over both Zigbee and Wifi/Ethernet. An example of this would be a [Philips Home Bridge](https://www.philips-hue.com/en-us/p/hue-bridge/046677458478#overview) which is used to communicate with their range of Hue smart bulbs over Zigbee. In our example a more basic device is used, a [CC2531 USB Dongle](https://www.itead.cc/cc2531-usb-dongle.html) which captures data from the Zigbee radio and communicates this back to the Raspberry Pi over a Serial port.
+Most often to capture data a bridge/hub device is needed which communicates over both Zigbee and Wi-Fi/Ethernet. An example of this would be a [Philips Home Bridge](https://www.philips-hue.com/en-us/p/hue-bridge/046677458478#overview) which is used to communicate with their range of Hue smart bulbs over Zigbee. In our example a more basic device is used, a [CC2531 USB Dongle](https://www.itead.cc/cc2531-usb-dongle.html) which captures data from the Zigbee radio and communicates this back to the Raspberry Pi over a Serial port.
 
 ## Zigbee2MQTT
 
@@ -778,9 +808,11 @@ int    time                          name                           state
 185659 2021.03.06D19:26:11.522660000 0x00124b001b78047b linkquality 139  
 ```
 
-# Creating a query API
+# Graphing the data
 
-...
+Using [KX Dashboards](https://code.kx.com/dashboards/) the captured data can then be graphed:
+
+![Dashboard](images/dashboard.png)
 
 # Conclusion
 
