@@ -25,7 +25,11 @@
   * [Storing MQTT sensor data](#storing-mqtt-sensor-data)
     * [Storing config data](#storing-config-data)
     * [Storing state data](#storing-state-data)
+      * [Extracting data from JSON templates using Jinja](#extracting-data-from-json-templates-using-jinja)
     * [Persisting data to disk](#persisting-data-to-disk)
+* [Zigbee](#zigbee)
+  * [Zigbee2MQTT](#zigbee2mqtt)
+  * [Capturing Zigbee sensor data in kdb+](#capturing-zigbee-sensor-data-in-kdb)
 * [Creating a query API](#creating-a-query-api)
 * [Conclusion](#conclusion)
   * [Relevant Links](#relevant-links)
@@ -551,31 +555,227 @@ Instead we can look to kdb+ to do this for us.
 
 ### Storing config data
 
-...
+Storing config data is straightforward by monitoring for incoming messages in topics matching `homeassistant/sensor/*/config`.
+As each new sensor configuration arrives we extract it's `state_topic` and subscribe to it.
+
+```q
+sensorConfig:([name:`$()] topic:`$();state_topic:`$();opts:())
+discoveryPrefix:"homeassistant"
+.mqtt.sub[`$discoveryPrefix,"/#"]
+
+.mqtt.msgrcvd:{[top;msg]
+  if[top like discoveryPrefix,"/sensor/*/config";
+    opts:.j.k msg;
+    .mqtt.sub[`$opts`state_topic];
+    `sensorConfig upsert (`$opts`name;`$top;`$opts`state_topic;opts);:(::)];
+ }
+```
+
+This data then populates the `sensorConfig` table.
+
+```q
+q)first sensorConfig
+topic      | `homeassistant/sensor/livingroomtemperature/config
+state_topic| `EnvironmentalMonitor/livingroom/state
+opts       | `name`state_topic`value_template`device_class`unit_of_measurement!("livingroomtemperature";"EnvironmentalMonitor/livingroom/state";"{% if value_json.temperature %}{{ value_json.temperature }}{% else %}{{ states('sensor.livingroomtemperature') }}{% endif %}";"temperature";"\302\272C")
+```
 
 ### Storing state data
 
-...
+As configuration has subscribed to each `state_topic` sensor state data will begin to arrive.
+A new `if` block can then be added to check if the incoming `topic` matches a configured `state_topic` in the `sensorConfig` table and store it if so.
+
+```q
+  if[(`$top) in exec state_topic from sensorConfig;
+     store[now;top;msg]];
+```
+
+#### Extracting data from JSON templates using Jinja
+
+The `value_template` system used by Home Assistant is a Python templating language called [Jinja](https://jinja.palletsprojects.com/).
+To use this in kdb+ we can use [embedPy](https://code.kx.com/q/ml/embedpy/) to expose Python functions.
+
+We can write a short `qjinja.py` script to expose the exact function we need:
+
+```python
+from jinja2 import Template
+import json
+
+def states(sensor):
+    return None;
+
+def extract(template, msg):
+    template = Template(template)
+    template.globals['states'] = states
+    return template.render(value_json=json.loads(msg));
+```
+
+Then `qjinja.q` can import and expose the python library:
+
+```q
+.qjinja.init:{[]
+  .qjinja.filePath:{x -3+count x} value .z.s;
+  slash:$[.z.o like "w*";"\\";"/"];
+  .qjinja.basePath:slash sv -1_slash vs .qjinja.filePath;
+  if[not `p in key `;system"l ",getenv[`QHOME],slash,"p.q"];
+  .p.e"import sys";
+  .p.e "sys.path.append(\"",ssr[;"\\";"\\\\"] .qjinja.basePath,"\")";
+  .qjinja.py.lib:.p.import`qjinja;
+  };
+
+.qjinja.init[];
+
+.qjinja.extract:{[template;msg]
+  .qjinja.py.lib[`:extract][template; msg]`
+  };
+```
+
+Values can now be extracted easily in kdb+:
+
+```
+q).qjinja.extract["{{ value_json.temperature }}";"{\"temperature\":22.2,\"humidity\":37,\"light\":20,\"pressure\":1027}"]
+"22.2"
+```
+
+The more complex templates are also handled by ensuring a `states` function was made available to the template: `template.globals['states'] = states`
+
+```
+q).qjinja.extract["{% if value_json.temperature %}{{ value_json.temperature }}{% else %}{{ states('sensor.livingroomtemperature') }}{% endif %}";"{\"humidity\":37,\"light\":20,\"pressure\":1027}"]
+"None"
+```
+
+Now that the correct information can be extracted we can check each message arriving and apply the correct set of `value_template` values:
+
+```q
+store:{[now;top;msg]
+ sensors:select name,value_template:opts[;`value_template] from sensorConfig where state_topic=`$top;
+ sensors:update time:now,val:{{$[x~"None";0Nf;"F"$x]}.qjinja.extract[x;y]}[;msg] each value_template from sensors;
+ `sensorState insert value exec time,name,val from sensors where not null val
+ }
+```
 
 ### Persisting data to disk
 
-Extending again we can save data to disk daily. The historic data table is named `readingsHist`, this is done to keep the example simple. Both historic and real-time data can be queried within one process.
+For the purposes of this small project the persisting logic is kept to a minimum. The process stores down data on an hourly basis.
+A blog on [partitioning data in kdb+](https://kx.com/blog/partitioning-data-in-kdb/) goes in to detail on this type of storage layout and methods which could be applied to further manage memory usage which in critical a low power edge node.
+The same process exposes both in memory and on disk data. To enable this the on disk table names a suffixed with `Hist`.
 
 ```q
-day:.z.d
-HDB:`:/home/pi/sensorHDB
-.z.zd:17 2 6
+sensorConfigHist:([] name:`$();topic:`$();state_topic:`$();opts:())
+sensorStateHist:([] int:`int$();time:`timestamp$();name:`$();state:())
 
-.mqtt.msgrcvd:{
-    now:.z.p;
-    if[day<`date$now;
-       .Q.dd[HDB;(`$string day;`readgingsHist;`)] set .Q.ens[HDB;readings;`sensors];
-       `readings set 0#readings;
-       day:`date$now;
-       system"l ",string HDB;
-     ];
-    `readings insert .z.p,@[`$"/" vs x;1 2],"F"$y
-    }
+writeToDisk:{[now]
+  .Q.dd[HDB;(`$string cHour;`sensorStateHist;`)] upsert .Q.ens[HDB;sensorState;`sensors];
+  `sensorState set 0#sensorState;
+  `cHour set hour now;
+  .Q.dd[HDB;(`sensorConfigHist;`)] set .Q.ens[HDB;0!sensorConfig;`sensors];
+  system"l ",1_string HDB;
+ }
+```
+
+# Zigbee
+
+[Zigbee](https://zigbeealliance.org/) is a wireless mess network protocol designed for usage in IoT applications. Unlike WiFi it's data transmission rate is a low 250 kbit/s but it's key advantage is simplicity and lower power usage.
+
+A device such as a [Sonoff SNZB-02](https://sonoff.tech/product/smart-home-security/snzb-02) temperature & humidity sensor can wirelessly send updates for months using only a small coin cell battery.
+
+Most often to capture data a bridge/hub device is needed which communicates over both Zigbee and Wifi/Ethernet. An example of this would be a [Philips Home Bridge](https://www.philips-hue.com/en-us/p/hue-bridge/046677458478#overview) which is used to communicate with their range of Hue smart bulbs over Zigbee. In our example a more basic device is used, a [CC2531 USB Dongle](https://www.itead.cc/cc2531-usb-dongle.html) which captures data from the Zigbee radio and communicates this back to the Raspberry Pi over a Serial port.
+
+## Zigbee2MQTT
+
+To bring the data available from the USB dongle on our MQTT IoT ecosystem we can use the [Zigbee2MQTT](https://www.zigbee2mqtt.io/) project. This reads the serial data and publishes it on MQTT. Many devices are supported including our [SNZB-02](https://www.zigbee2mqtt.io/devices/SNZB-02.html) sensor.
+Through configuration we can also turn on the supported [Home Assistant integration](https://www.zigbee2mqtt.io/integration/home_assistant)
+
+```yaml
+homeassistant: true
+permit_join: false
+mqtt:
+  base_topic: zigbee2mqtt
+  server: 'mqtt://localhost'
+serial:
+  port: /dev/ttyACM0
+```
+
+After running Zigbee2MQTT `mosquitto_sub` can quickly check if data is arriving
+
+```bash
+mosquitto_sub -t 'homeassistant/sensor/#' -v
+```
+
+The sensor can be seen configurating 4 sensors:
+
+1. `temperature`
+2. `humidity`
+3. `battery`
+4. `linkquality`
+
+The topics follow the pattern we have seen previously:
+
+```
+homeassistant/sensor/0x00124b001b78047b/temperature/config
+```
+
+The configuration message includes many more fields that we populated in our basic sensors:
+
+```json
+{
+   "availability":[
+      {
+         "topic":"zigbee2mqtt/bridge/state"
+      }
+   ],
+   "device":{
+      "identifiers":[
+         "zigbee2mqtt_0x00124b001b78047b"
+      ],
+      "manufacturer":"SONOFF",
+      "model":"Temperature and humidity sensor (SNZB-02)",
+      "name":"0x00124b001b78047b",
+      "sw_version":"Zigbee2MQTT 1.17.0"
+   },
+   "device_class":"temperature",
+   "json_attributes_topic":"zigbee2mqtt/0x00124b001b78047b",
+   "name":"0x00124b001b78047b temperature",
+   "state_topic":"zigbee2mqtt/0x00124b001b78047b",
+   "unique_id":"0x00124b001b78047b_temperature_zigbee2mqtt",
+   "unit_of_measurement":"°C",
+   "value_template":"{{ value_json.temperature }}"
+}
+```
+
+Subscribing to the `state_topic` sensor updates can be shown:
+
+```
+$mosquitto_sub -t 'zigbee2mqtt/0x00124b001b78047b' -v
+zigbee2mqtt/0x00124b001b78047b {"battery":64,"humidity":47.21,"linkquality":139,"temperature":19.63,"voltage":2900}
+```
+
+## Capturing Zigbee sensor data in kdb+
+
+Because we designed our DIY sensors to meet a spec our system in fact needs no changes to capture the new data.
+The choice to break optional variables out to the `opts` proves useful here as many more fields have been populated:
+
+```q
+q)sensorConfig`$"0x00124b001b78047b temperature"
+topic      | `homeassistant/sensor/0x00124b001b78047b/temperature/config
+state_topic| `zigbee2mqtt/0x00124b001b78047b
+opts       | `availability`device`device_class`json_attributes_topic`name`state_topic`unique_id`unit_of_measu..
+```
+
+Updates for all 4 configured sensors are available in the `sensorState` table:
+
+```
+q)select from sensorStateHist where name like "0x00124b001b78047b*"
+int    time                          name                           state
+-------------------------------------------------------------------------
+185659 2021.03.06D19:10:09.694120000 0x00124b001b78047b battery     64   
+185659 2021.03.06D19:10:09.694120000 0x00124b001b78047b temperature 19.6 
+185659 2021.03.06D19:10:09.694120000 0x00124b001b78047b humidity    51.74
+185659 2021.03.06D19:10:09.694120000 0x00124b001b78047b linkquality 139  
+185659 2021.03.06D19:26:11.522660000 0x00124b001b78047b battery     64   
+185659 2021.03.06D19:26:11.522660000 0x00124b001b78047b temperature 19.6 
+185659 2021.03.06D19:26:11.522660000 0x00124b001b78047b humidity    52.82
+185659 2021.03.06D19:26:11.522660000 0x00124b001b78047b linkquality 139  
 ```
 
 # Creating a query API
