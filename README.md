@@ -3,19 +3,23 @@
 * [KX IoT with MQTT](#kx-iot-with-mqtt)
   * [What is MQTT](#what-is-mqtt)
   * [Sections](#sections)
+* [IoT](#iot)
+  * [Edge devices](#edge-devices)
 * [Install and setup](#install-and-setup)
   * [Install and test a broker](#install-and-test-a-broker)
   * [Install kdb+](#install-kdb)
   * [Install the KX MQTT interface](#install-the-kx-mqtt-interface)
   * [Test the KX MQTT interface](#test-the-kx-mqtt-interface)
-* [Reading sensor data](#reading-sensor-data)
+* [Capturing sensor data](#capturing-sensor-data)
+* [Reading sensor data in kdb+](#reading-sensor-data-in-kdb)
   * [Read serial data with kdb+](#read-serial-data-with-kdb)
   * [Calculate an error detecting checksum](#calculate-an-error-detecting-checksum)
 * [Publishing data to an IoT platform](#publishing-data-to-an-iot-platform)
   * [Home Assistant](#home-assistant)
   * [Configuring sensors](#configuring-sensors)
-  * [QoS](#qos)
+  * [Quality of Service](#quality-of-service)
   * [Retained messages](#retained-messages)
+  * [Birth and Last Will](#birth-and-last-will)
   * [Retaining flexibility](#retaining-flexibility)
   * [Publishing updates](#publishing-updates)
   * [Reducing data volume](#reducing-data-volume)
@@ -43,8 +47,6 @@
 
 KX have  released an MQTT interface. Documented on [code.kx.com](https://code.kx.com/q/interfaces/mqtt/) with source code available on [Github](https://github.com/KXSystems/mqtt). The interface supports Linux/Mac/Windows platforms.
 
-For examples in this paper a Raspberry Pi 3 Model B+ has been chosen as a host. This is a low powered single board computer which is suitable as an edge computing host. The Linux ARM 32-bit release of kdb+ enables it to run on the Raspberry Pi.
-
 ## Sections
 
 1. [Install and setup](#install-and-setup)
@@ -54,6 +56,16 @@ For examples in this paper a Raspberry Pi 3 Model B+ has been chosen as a host. 
 5. [Zigbee](#zigbee)
 6. [Graphing the data](#graphing-the-data)
 7. [Conclusion](#conclusion)
+
+# IoT
+
+The Internet of things (IoT) describes the network of "things" that are embedded with sensors, software, and other technologies and connect and exchange data with other devices and systems over the Internet.
+
+## Edge devices
+
+Edge computing defines hardware which performs data processing at it's source rather than in a centralized location. This enables efficiency and robustness as it reduces data transfer requirements and increases robustness as edge devices may continue to operate without a consistent network link to a central server. Edge devices must be compact, efficient and robust.
+
+For examples in this paper a [Raspberry Pi 3 Model B+](https://www.raspberrypi.org/products/raspberry-pi-3-model-b-plus/) has been chosen as an example of an edge device. This is a low powered single board computer. The Linux ARM 32-bit release of kdb+ enables it to run on the Raspberry Pi.
 
 # Install and setup
 
@@ -127,22 +139,32 @@ tar -xzf v1.3.8.tar.gz -C ./paho.mqtt.c --strip-components=1
 cd paho.mqtt.c
 make
 sudo make install
-export BUILD_HOME=$(pwd)
+export MQTT_INSTALL_DIR=$(pwd)
 ```
 
-Now the system is ready for the KX MQTT interface to be installed. Use it's [releases](https://github.com/KXSystems/mqtt/releases) tab on Github to find a link to the latest available.
+Now the system is ready for the KX MQTT interface to be installed.
+
+Generally it is best practice to use the [releases](https://github.com/KXSystems/mqtt/releases) tab on Github to find a link to the latest available and download it.
 
 ```bash
 wget -O mqtt.tar.gz https://github.com/KxSystems/mqtt/archive/1.0.0.tar.gz
 tar -xzf mqtt.tar.gz
 cd mqtt-1.0.0
+```
+
+Instead as we wise to use some unreleased recently added functionality we will compile directly from the repositories source.
+
+```bash
+git clone https://github.com/KxSystems/mqtt.git
+cd mqtt
+```
+
+These next steps are the same regardless if you are building a release or directly from source.
+
+```bash
 mkdir cmake && cd cmake
 cmake ..
-make
-make install
-cd ..
-cp q/mqtt.q $QHOME/
-cp cmake/mqtt.so $QHOME/l32/
+cmake --build . --target install
 ```
 
 ## Test the KX MQTT interface
@@ -166,18 +188,31 @@ q)(`msgsent;2)
 
 More examples are included on [code.kx.com](https://code.kx.com/q/interfaces/mqtt/examples/)
 
-# Reading sensor data
+# Capturing sensor data
 
-For a simple example project we will collect some sensor data and publish it to an IoT platform.
-The full project is available at [github.com/rianoc/EnvironmentalMonitor](https://github.com/rianoc/EnvironmentalMonitor).
+The comma separated field contain:
 
-![Dataflow layout](images/layout.png)
+1. Temperature - Celsius
+2. Humidity - Percent
+3. Light - Analog value between 0 and 100
+4. Pressure - Pa
+5. Altitude - m (Not accurate)
+6. CRC-16 - checksum of data fields
+
+![Dataflow layout](images/layout.jpg)
 
 The data source will be an [Arduino](https://www.arduino.cc/) microcontroller. Temperature, pressure, humidity and light readings will be read by kdb+ over a serial USB connection.
 
 ![Arduino with sensors](images/EnvironmentalMonitor.jpg)
 
+# Reading sensor data in kdb+
+
+For a example project we will collect some sensor data and publish it to an IoT platform.
+The full project is available at [github.com/rianoc/EnvironmentalMonitor](https://github.com/rianoc/EnvironmentalMonitor).
+
 ## Read serial data with kdb+
+
+The originals of the serial communication protocol data back to 1960. It is still in use in devices due to it's simplicity.
 
 Reading the serial data in kdb+ is quick using [named pipe](https://code.kx.com/q/kb/named-pipes/) support:
 
@@ -186,15 +221,6 @@ q)ser:hopen`$":fifo://",COM
 q)read0 ser
 "26.70,35,736,1013,-5.91,26421"
 ```
-
-The comma separated field contain:
-
-1. Temperature - Celsius
-1. Humidity - Percent
-1. Light - Analog value between 0 and 1023
-1. Pressure - Pa
-1. Altitude - m (Not accurate)
-1. CRC-16 - checksum of data fields
 
 ## Calculate an error detecting checksum
 
@@ -218,10 +244,19 @@ crc16:{
  };
 ```
 
-In this example pressure can be seen to have arrived incorrectly as `101020` rather than `1020`:
+In this example pressure can be seen to have arrived incorrectly as `195` rather than `19.5`:
 
 ```txt
-Error with data: "26.30,36,739,101020,-56.88,17352" 'Failed checksum check
+Error with data: "195,39,12,995,8804,21287" 'Failed checksum check
+```
+
+We can see that `crc16` will only return the `21287` if the message is valid:
+
+```
+q)crc16 "195,39,12,995,8804"
+15720
+q)crc16 "19.5,39,12,995,8804"
+21287
 ```
 
 # Publishing data to an IoT platform
@@ -243,7 +278,7 @@ name        class       unit        icon
 ---------------------------------------------------------
 temperature temperature "ºC"        ""                   
 humidity    humidity    "%"         ""                   
-light                   "/100"     "white-balance-sunny"
+light                   "/100"     "mdi:white-balance-sunny"
 pressure    pressure    "hPa"       ""                   
 ```
 
@@ -303,13 +338,13 @@ configure:{[s]
 configure each sensors;
 ```
 
-Note that [.mqtt.pubx](https://code.kx.com/q/interfaces/mqtt/reference/#mqttpubx) rather than the default `.mqtt.pub` is used to set QoS to `1` and Retain to true (`1b`) for these configuration messages.
+Note that [.mqtt.pubx](https://code.kx.com/q/interfaces/mqtt/reference/#mqttpubx) rather than the default `.mqtt.pub` is used to set [Quality of Service](#quality-of-service) to `1` and Retain to true (`1b`) for these configuration messages.
 
 ```q
 .mqtt.pubx[topic;;1;1b]
 ```
 
-## QoS
+## Quality of Service
 
 Quality of Service (QoS) is an important feature. There are 3 QoS levels in MQTT:
 
@@ -324,6 +359,37 @@ To be a lightweight system MQTT will default to a fire and forget approach to se
 Unlike other messaging systems such as a kdb+ [Tickerplant](https://code.kx.com/q/learn/startingkdb/tick/#tickerplant), [Kafka](https://code.kx.com/q/interfaces/kafka/), or [Solace](https://code.kx.com/q/interfaces/solace/) MQTT does not retain logs of all data that flows through the broker. This makes sense as the MQTT broker should be lightweight and able to run on an edge device with slow and limited storage. Also in a bandwidth limited environment attempting to replay large logs could interfere with the publishing of the more important real-time data.
 The MQTT spec does however allow for a single message to be retained per topic. Importantly what this allows for is that our downstream clients no matter when they connect will receive the configuration metadata of our sensors.
 
+## Birth and Last Will
+
+In an environment with unreliable connections it is useful to know if a system is online.
+
+To announce that our sensor is online we can add a "birth" message. This does not have a technical meaning rather it is a concept. We will add a line in the `connect` function to publish a message to say the sensor is online as soon as we connect. QoS 2 and retain set to true are used to ensure this message is delivered.
+
+The [Last Will and Testament](https://www.hivemq.com/blog/mqtt-essentials-part-9-last-will-and-testament/) is part of the technical spec for MQTT. When connecting to the MQTT broker we can specify and topic and message. The broker does not immediately publish this message to subscribers. Instead it waits until there is an unexpected disconnection from the publisher.
+
+With these added the `connect` function now looks like:
+
+```q
+connect:{
+ statusTopic:`$"EnvironmentalMonitor/",room,"/status";
+ opts:`lastWillTopic`lastWillQos`lastWillMessage`lastWillRetain!(statusTopic;2;"offline";1);
+ .mqtt.conn[`$broker_address,":",string port;clientID;opts];
+ .mqtt.pubx[statusTopic;;2;1b] "online";
+ conn::1b;
+ configure each sensors;
+ }
+```
+
+Starting and stopping our process we can now see these messages being triggered.
+Note the usage of the `+` character which acts as a single level wildcard, unlike `#` which is multi level.
+
+```bash
+mosquitto_sub -h localhost -v -t "EnvironmentalMonitor/+/status"
+EnvironmentalMonitor/livingroom/status online
+EnvironmentalMonitor/livingroom/status offline
+
+```
+
 ## Retaining flexibility
 
 Reviewing our `sensors` table and `configure` function we can spot some patterns. Optional configuration variables such as `icon` tend to be sparsely populated in the table and require specific `if` blocks in our `configure` function. Further reviewing the [MQTT Sensor](https://www.home-assistant.io/integrations/sensor.mqtt/) specification we can see there are a total of 26 optional variables. If we were to support all of these our table would be extremely wide and sparsely populated and the `configure` function would need 26 `if` statements. This is clearly something to avoid. Furthermore if a new optional variable was added to the spec we would need to update our full system and database schema.
@@ -336,7 +402,7 @@ To address this in our design we change our table to move all optional parameter
 sensors:([] name:`temperature`humidity`light`pressure;
             opts:(`device_class`unit_of_measurement!(`temperature;"ºC");
                   `device_class`unit_of_measurement!(`humidity;"%");
-                  `unit_of_measurement`icon!("/100";"white-balance-sunny");
+                  `unit_of_measurement`icon!("/100";"mdi:white-balance-sunny");
                   `device_class`unit_of_measurement!(`pressure;"hPa"))
  )
 ```
@@ -348,7 +414,7 @@ name        opts
 ----------------------------------------------------------------------------
 temperature `device_class`unit_of_measurement!(`temperature;"\302\272C")
 humidity    `device_class`unit_of_measurement!(`humidity;"%")           
-light       `unit_of_measurement`icon!("/100";"white-balance-sunny")    
+light       `unit_of_measurement`icon!("/100";"mdi:white-balance-sunny")    
 pressure    `device_class`unit_of_measurement!(`pressure;"hPa")     
 ```
 
@@ -422,7 +488,7 @@ sensors:([] name:`temperature`humidity`light`pressure;
             lastVal:4#0Nf;
             opts:(`device_class`unit_of_measurement!(`temperature;"ºC");
                   `device_class`unit_of_measurement!(`humidity;"%");
-                  `unit_of_measurement`icon!("/100";"white-balance-sunny");
+                  `unit_of_measurement`icon!("/100";"mdi:white-balance-sunny");
                   `device_class`unit_of_measurement!(`pressure;"hPa"))
  )
 ```
@@ -432,7 +498,7 @@ name        lastPub lastVal opts
 --------------------------------------------------------------------------------------------
 temperature                 `device_class`unit_of_measurement!(`temperature;"\302\272C")
 humidity                    `device_class`unit_of_measurement!(`humidity;"%")           
-light                       `unit_of_measurement`icon!("/100";"white-balance-sunny")    
+light                       `unit_of_measurement`icon!("/100";"mdi:white-balance-sunny")    
 pressure                    `device_class`unit_of_measurement!(`pressure;"hPa")    
 ```
 
@@ -454,7 +520,6 @@ The function will only publish data when either the sensor value changes or if 1
 
 ```q
 filterPub:{[newVals]
- newVals:@[newVals;2;{`float$floor x%10.23}];
  now:.z.p;
  toPub:exec (lastPub<.z.p-0D00:10) or (not lastVal=newVals) from sensors;
  if[count where toPub;
