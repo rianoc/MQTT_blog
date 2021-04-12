@@ -45,7 +45,7 @@
 
 [MQTT](http://mqtt.org/) is a messaging protocol for the Internet of Things (IoT). It was designed as an extremely lightweight publish/subscribe messaging transport. It is useful for connections with remote locations where a small code footprint is required and/or network bandwidth is at a premium.
 
-KX have  released an MQTT interface. Documented on [code.kx.com](https://code.kx.com/q/interfaces/mqtt/) with source code available on [Github](https://github.com/KXSystems/mqtt). The interface supports Linux/Mac/Windows platforms.
+KX have  released an MQTT interface, documented on [code.kx.com](https://code.kx.com/q/interfaces/mqtt/) with source code available on [Github](https://github.com/KXSystems/mqtt). The interface supports Linux/Mac/Windows platforms.
 
 ## Sections
 
@@ -115,8 +115,8 @@ mv q ~/
 Add `QHOME` to your `.bashrc`:
 
 ```bash
-export PATH="$PATH:/home/pi/q/l32"
-export QHOME="/home/pi/q"
+export PATH="$PATH:~/q/l32"
+export QHOME="~/q"
 ```
 
 ## Install the KX MQTT interface
@@ -153,7 +153,7 @@ tar -xzf mqtt.tar.gz
 cd mqtt-1.0.0
 ```
 
-Instead as we wish to use some unreleased recently added functionality we will compile directly from the repositories source.
+Instead, as we wish to use some unreleased recently added functionality, we will compile directly from the repository source.
 
 ```bash
 git clone https://github.com/KxSystems/mqtt.git
@@ -195,7 +195,7 @@ More examples are included on [code.kx.com](https://code.kx.com/q/interfaces/mqt
 
 # Reading sensor data in kdb+
 
-For a example project we will collect some sensor data and publish it to an IoT platform.
+For an example project we will collect some sensor data and publish it to an IoT platform.
 The full project is available at [github.com/rianoc/EnvironmentalMonitor](https://github.com/rianoc/EnvironmentalMonitor).
 
 ![Dataflow layout](images/layout.jpg)
@@ -229,7 +229,7 @@ The comma separated field contain:
 2. Humidity - Percent
 3. Light - Analog value between 0 and 100
 4. Pressure - Pa
-5. Altitude - m (Not accurate)
+5. Altitude - m (rudimentary estimate)
 6. CRC-16 - Checksum of data fields
 
 ## Calculate an error detecting checksum
@@ -293,13 +293,13 @@ pressure    pressure    "hPa"       ""
 ```
 
 * `name` - The name of the sensor
-* `class` - Home Assistant has some predefined [classes](https://www.home-assistant.io/integrations/sensor/#device-class) of sensor.
+* `class` - Home Assistant has some predefined [classes](https://www.home-assistant.io/integrations/sensor/#device-class) of sensor
 * `unit` - the unit of measure of the sensor
-* `icon` - An icon can be chosen for the UI.
+* `icon` - An icon can be chosen for the UI
 
-As our light sensor does not fall in to a known `class`, it's value is left as null and we must chose an `icon` as without a default `class` one will not be automatically populated.
+As our light sensor does not fall into a known `class`, it's value is left as null and we must chose an `icon` as without a default `class` one will not be automatically populated.
 
-Now that we have defined out metadata we are required to publish it. MQTT uses a hierarchy of topics when data is published. To configure a home assistant sensor a message must arrive on a topic of the structure:
+Now that we have defined the metadata we need to publish it. MQTT uses a hierarchy of topics when data is published. To configure a home assistant sensor a message must arrive on a topic of the structure:
 
 ```txt
 <discovery_prefix>/<component>/[<node_id>/]<object_id>/config
@@ -314,8 +314,8 @@ homeassistant/sensor/livingroomhumidity/config
 The payload we publish on this topic will include our metadata along with some extra fields.
 
 * `unique_id` - A unique ID is important throughout IoT systems to allow metadata to be related to sensor data
-* `state_topic` - The sensor here is announcing that any state updates will arrive on this topic.
-* `value_template`- This template enables the system to extract the sensor value from the payload
+* `state_topic` - The sensor here is announcing that any state updates will arrive on this topic
+* `value_template` - This template enables the system to extract the sensor value from the payload
 
 A populated JSON config message for the humidity sensors:
 
@@ -362,7 +362,7 @@ Note that [.mqtt.pubx](https://code.kx.com/q/interfaces/mqtt/reference/#mqttpubx
 * At least once (1)
 * Exactly once (2)
 
-To be a lightweight system MQTT will default to QoS 0, a fire and forget approach to sending messages. This may be suitable for temperature updates in our system as one missed update will not cause any issues. However for our configuration of sensors we do want to ensure this information arrives. In this case we choose QoS 1. QoS 2 has more overheard than 1 and here is of no benefit as there is no drawback to configuring a sensor twice.
+To be a lightweight system MQTT will default to QoS 0, a fire and forget approach to sending messages. This may be suitable for temperature updates in our system as one missed update will not cause any issues. However for our configuration of sensors we do want to ensure this information arrives. In this case we choose QoS 1. QoS 2 has more overhead than 1 and here is of no benefit as there is no drawback to configuring a sensor twice.
 
 ## Retained messages
 
@@ -375,7 +375,7 @@ In an environment with unreliable connections it is useful to know if a system i
 
 To announce that our sensor is online we can add a "birth" message. This does not have a technical meaning rather it is a practice. We will add a line in the `connect` function to publish a message to say the sensor is online as soon as we connect. QoS 2 and retain set to true are used to ensure this message is delivered.
 
-The [Last Will and Testament](https://www.hivemq.com/blog/mqtt-essentials-part-9-last-will-and-testament/) is part of the technical spec for MQTT. When connecting to the MQTT broker we can specify and topic, message, QoS and retain rules by populating the final dictionary `opts` parameter of `.mqtt.conn`. The broker does not immediately publish this message to subscribers. Instead it waits until there is an unexpected disconnection from the publisher.
+The [Last Will and Testament](https://www.hivemq.com/blog/mqtt-essentials-part-9-last-will-and-testament/) is part of the technical spec for MQTT. When connecting to the MQTT broker we can specify the topic, message, QoS, and retain rules by populating the final dictionary `opts` parameter of `.mqtt.conn`. The broker does not immediately publish this message to subscribers. Instead it waits until there is an unexpected disconnection from the publisher.
 
 With these added the `connect` function now looks like:
 
@@ -405,7 +405,7 @@ Reviewing our `sensors` table and `configure` function we can spot some patterns
 
 This example shows the importance of designing an IoT system for flexibility. When dealing with many vendors and specifications the number of possible configurations is huge.
 
-To address this in our design we change our table to move all optional parameters to an `opts` column which stores the values in dictionaries.
+To address this in our design we change our table to move all optional parameters to an `opts` column which stores the values in dictionaries. Other databases might limit datatypes within cells but in kdb+ we can insert any possible data structure available to the language.
 
 ```q
 sensors:([] name:`temperature`humidity`light`pressure;
@@ -736,7 +736,7 @@ store:{[now;top;msg]
 ### Persisting data to disk
 
 For the purposes of this small project the persisting logic is kept to a minimum. The process stores down data on an hourly basis.
-A blog on [partitioning data in kdb+](https://kx.com/blog/partitioning-data-in-kdb/) goes in to detail on this type of storage layout and methods which could be applied to further manage memory usage which in critical a low power edge node.
+A blog on [partitioning data in kdb+](https://kx.com/blog/partitioning-data-in-kdb/) goes into detail on this type of storage layout and methods which could be applied to further manage memory usage which in critical a low power edge node.
 The same process exposes both in memory and on disk data. To enable this the on disk table names a suffixed with `Hist`.
 
 ```q
