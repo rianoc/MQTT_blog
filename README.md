@@ -47,6 +47,8 @@
 
 KX have  released an MQTT interface, documented on [code.kx.com](https://code.kx.com/q/interfaces/mqtt/) with source code available on [Github](https://github.com/KXSystems/mqtt). The interface supports Linux/Mac/Windows platforms.
 
+This interface can be used with the enterprise [KX Streaming Analytics](https://kx.com/platform/) platform. For this paper the underlying [kdb+](https://code.kx.com/q/) language will be used to explore the core functionality available.
+
 ## Sections
 
 1. [What is IoT](#what-is-iot)
@@ -64,7 +66,7 @@ The Internet of things (IoT) describes the network of "things" that are embedded
 
 ## Edge devices
 
-Edge computing defines hardware which performs data processing at it's source rather than in a centralized location. This enables efficiency and robustness as it reduces data transfer requirements and allows edge devices to continue to operate without a consistent network link to a central server. Edge devices must be compact, efficient and even ruggedized for harsh environments.
+Edge computing defines hardware which performs data processing at its source rather than in a centralized location. This enables efficiency and robustness as it reduces data transfer requirements and allows edge devices to continue to operate without a consistent network link to a central server. Edge devices must be compact, efficient and even ruggedized for harsh environments.
 
 For examples in this paper a [Raspberry Pi 3 Model B+](https://www.raspberrypi.org/products/raspberry-pi-3-model-b-plus/) has been chosen as an example of an edge class device. This is a low powered single board computer. The Linux ARM 32-bit release of kdb+ enables it to run on the Raspberry Pi.
 
@@ -131,7 +133,7 @@ sudo apt-get install libssl-dev cmake
 ```
 
 The [Paho MQTT C client library](https://www.eclipse.org/paho/files/mqttdoc/MQTTClient/html/index.html) needs to be available before the interface can be compiled.
-Take the link to the latest `paho.mqtt.c` library from it's [releases](https://github.com/eclipse/paho.mqtt.c/releases) tab on Github.
+Take the link to the latest `paho.mqtt.c` library from its [releases](https://github.com/eclipse/paho.mqtt.c/releases) tab on Github.
 
 ```bash
 mkdir paho.mqtt.c
@@ -205,7 +207,7 @@ The full project is available at [github.com/rianoc/EnvironmentalMonitor](https:
 The data source will be an [Arduino](https://www.arduino.cc/) microcontroller.
 A microcontroller is a single chip microcomputer, they are simplified and do not run an operating system. The Arduino [UNO](https://store.arduino.cc/arduino-uno-rev3) in use here has 32KB of storage and 2KB of SRAM.
 
-To program an Arduino we load a single [sketch](https://www.arduino.cc/en/tutorial/sketch) to it storage. The file [EnvironmentalMonitor.ino](https://github.com/rianoc/EnvironmentalMonitor/blob/master/EnvironmentalMonitor.ino) is written in a C/C++ dialect which is simplified to specifically run on microcontrollers.
+To program an Arduino we upload a single [sketch](https://www.arduino.cc/en/tutorial/sketch) to it. The file [EnvironmentalMonitor.ino](https://github.com/rianoc/EnvironmentalMonitor/blob/master/EnvironmentalMonitor.ino) is written in a C/C++ dialect which is simplified to specifically run on microcontrollers.
 
 The uploaded sketch gathers temperature, pressure, humidity, and light readings from attached sensors and sends it back to the Raspberry Pi over a serial USB connection.
 
@@ -213,7 +215,7 @@ The uploaded sketch gathers temperature, pressure, humidity, and light readings 
 
 ## Reading serial data with kdb+
 
-The originals of the serial communication protocol data back to 1960. It is still in use in devices due to it's simplicity.
+The originals of the serial communication protocol data back to 1960. It is still in use in devices due to its simplicity.
 
 Reading the serial data in kdb+ is quick using [named pipe](https://code.kx.com/q/kb/named-pipes/) support:
 
@@ -234,7 +236,7 @@ The comma separated field contain:
 
 ## Calculate an error detecting checksum
 
-The final field is particularly important. This is a [checksum](https://en.wikipedia.org/wiki/Cyclic_redundancy_check) which enables error-detection, a requirement as serial data can be unreliable. Without this incorrect data could be interpreted as correct. For example a temperature reading such as `26.70` missing it's decimal point would be published as `2670`.
+The final field is particularly important. This is a [checksum](https://en.wikipedia.org/wiki/Cyclic_redundancy_check) which enables error-detection, a requirement as serial data can be unreliable. Without this incorrect data could be interpreted as correct. For example a temperature reading such as `26.70` missing its decimal point would be published as `2670`.
 
 In kdb+ a function is needed to generate a checksum to compare against the one sent by the Arduino. If the two values do not match the data is rejected as it contains an error.
 
@@ -297,7 +299,7 @@ pressure    pressure    "hPa"       ""
 * `unit` - the unit of measure of the sensor
 * `icon` - An icon can be chosen for the UI
 
-As our light sensor does not fall into a known `class`, it's value is left as null and we must chose an `icon` as without a default `class` one will not be automatically populated.
+As our light sensor does not fall into a known `class`, its value is left as null and we must chose an `icon` as without a default `class` one will not be automatically populated.
 
 Now that we have defined the metadata we need to publish it. MQTT uses a hierarchy of topics when data is published. To configure a home assistant sensor a message must arrive on a topic of the structure:
 
@@ -473,7 +475,7 @@ pub:{[]
 \t 1000
 ```
 
-Here we use `.mqtt.pub` which defaults QoS to `0` and Retain to false (`0b`) as we these state updates are less important.
+Here we use `.mqtt.pub` which defaults QoS to `0` and Retain to false (`0b`) as these state updates are less important.
 
 An example JSON message on the topic `homeassistant/sensor/livingroom/state`:
 
@@ -485,8 +487,8 @@ It can be noted here that we published a configure message per sensor but for st
 
 ## Reducing data volume
 
-In our example we are publishing 4 values every seconds, in a day this is 86k updates resulting in 344k sensor values being stored in our database.
-Many of these values will be repeated. As these are state changes and not events there is no value is storing repeats. In an IoT project for efficiency this should be addressed at the source and not the destination.
+In our example we are publishing 4 values every second, in a day this is 86k updates resulting in 344k sensor values being stored in our database.
+Many of these values will be repeated. As these are state changes and not events there is no value in storing repeats. In an IoT project for efficiency this should be addressed at the source and not the destination.
 This edge processing is necessary to reduce the hardware and network requirements throughout the full stack.
 
 The first step we take is to add a `lastPub` and `lastVal` column to our `sensors` metadata table:
@@ -635,7 +637,7 @@ Instead we can look to kdb+ to do this for us.
 ### Storing config data
 
 Storing config data is straightforward by monitoring for incoming messages in topics matching `homeassistant/sensor/*/config`.
-As each new sensor configuration arrives we extract it's `state_topic` and subscribe to it.
+As each new sensor configuration arrives we extract its `state_topic` and subscribe to it.
 
 ```q
 sensorConfig:([name:`$()] topic:`$();state_topic:`$();opts:())
@@ -735,9 +737,9 @@ store:{[now;top;msg]
 
 ### Persisting data to disk
 
-For the purposes of this small project the persisting logic is kept to a minimum. The process stores down data on an hourly basis.
+For the purposes of this small project the persisting logic is kept to a minimum. The process keeps data in memory for one hour and then persists to disk.
 A blog on [partitioning data in kdb+](https://kx.com/blog/partitioning-data-in-kdb/) goes into detail on this type of storage layout and methods which could be applied to further manage memory usage which in critical a low power edge node.
-The same process exposes both in memory and on disk data. To enable this the on disk table names a suffixed with `Hist`.
+The same process exposes both in memory and on disk data. To enable this the on disk table names are suffixed with `Hist`.
 
 ```q
 sensorConfigHist:([] name:`$();topic:`$();state_topic:`$();opts:())
@@ -754,7 +756,7 @@ writeToDisk:{[now]
 
 ### Creating a basic query API
 
-A very basic query API can be created to extract the data from the system
+A very basic query API can be created to extract the data from the system.
 
 ```q
 queryState:{[sensor;sTime;eTime]
@@ -782,7 +784,7 @@ time                          name                           state
 
 # Zigbee
 
-[Zigbee](https://zigbeealliance.org/) is a wireless mesh network protocol designed for usage in IoT applications. Unlike Wi-Fi it's data transmission rate is a low 250 kbit/s but it's key advantage is simplicity and lower power usage.
+[Zigbee](https://zigbeealliance.org/) is a wireless mesh network protocol designed for usage in IoT applications. Unlike Wi-Fi its data transmission rate is a low 250 kbit/s but its key advantage is simplicity and lower power usage.
 
 A device such as a [Sonoff SNZB-02](https://sonoff.tech/product/smart-home-security/snzb-02) temperature & humidity sensor can wirelessly send updates for months using only a small coin cell battery.
 
@@ -893,7 +895,7 @@ Using [KX Dashboards](https://code.kx.com/dashboards/) the captured data can the
 
 # Conclusion
 
-The world of IoT is complex with many languages, systems, and protocols. To be successful interoperability and flexibility are key. Here with the MQTT interface, along with pre-existing python and JSON functionality kdb+ shows what can be achieved with a subset of it's many [interfaces](https://code.kx.com/q/interfaces). Then as a database layer kdb+ shows it's flexibility allowing us to tailor how data is captured, stored, and queried based on the data, use-case, and hardware for the application.
+The world of IoT is complex with many languages, systems, and protocols. To be successful interoperability and flexibility are key. Here with the MQTT interface, along with pre-existing python and JSON functionality kdb+ shows what can be achieved with a subset of its many [interfaces](https://code.kx.com/q/interfaces). Then as a database layer kdb+ shows its flexibility allowing us to tailor how data is captured, stored, and queried based on the data, use-case, and hardware for the application.
 
 ## Relevant Links
 
