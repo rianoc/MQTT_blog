@@ -45,7 +45,7 @@
 
 [MQTT](http://mqtt.org/) is a messaging protocol for the Internet of Things (IoT). It was designed as an extremely lightweight publish/subscribe messaging transport. It is useful for connections with remote locations where a small code footprint is required and/or network bandwidth is at a premium.
 
-KX have  released an MQTT interface, documented on [code.kx.com](https://code.kx.com/q/interfaces/mqtt/) with source code available on [Github](https://github.com/KXSystems/mqtt). The interface supports Linux/Mac/Windows platforms.
+KX have released an MQTT interface, documented on [code.kx.com](https://code.kx.com/q/interfaces/mqtt/) with source code available on [Github](https://github.com/KXSystems/mqtt). The interface supports Linux/Mac/Windows platforms.
 
 This interface can be used with the enterprise [KX Streaming Analytics](https://kx.com/platform/) platform. For this paper the underlying [kdb+](https://code.kx.com/q/) language will be used to explore the core functionality available.
 
@@ -895,7 +895,7 @@ Using [KX Dashboards](https://code.kx.com/dashboards/) the captured data can the
 
 # Conclusion
 
-The world of IoT is complex with many languages, systems, and protocols. To be successful interoperability and flexibility are key. Here with the MQTT interface, along with pre-existing python and JSON functionality kdb+ shows what can be achieved with a subset of its many [interfaces](https://code.kx.com/q/interfaces). Then as a database layer kdb+ shows its flexibility allowing us to tailor how data is captured, stored, and queried based on the data, use-case, and hardware for the application.
+The world of IoT is complex with many languages, systems, and protocols. To be successful interoperability and flexibility are key. Here with the MQTT interface, along with pre-existing python and JSON functionality kdb+ shows what can be achieved with a subset of its many [interfaces](https://code.kx.com/q/interfaces). Then as a database layer kdb+ shows its ability to tailor how data is captured, stored, and queried based on the data, use-case, and hardware for the application.
 
 ## Relevant Links
 
