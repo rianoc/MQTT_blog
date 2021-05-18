@@ -256,7 +256,7 @@ crc16:{
  }
 ```
 
-In this example pressure can be seen to have arrived incorrectly as `195` rather than `19.5`:
+In this example temperature can be seen to have arrived incorrectly as `195` rather than `19.5`:
 
 ```txt
 Error with data: "195,39,12,995,8804,21287" 'Failed checksum check
